@@ -246,8 +246,8 @@ for (const el of document.querySelectorAll('.slot')) {
   el.querySelector('.x').onclick = (e) => { e.preventDefault(); e.stopPropagation(); delete S.photos[slot]; el.classList.remove('has'); el.querySelector('img').removeAttribute('src'); hideFrom(2); };
 }
 const fields = () => ({ name: $('fName').value.trim(), food: $('fFood').value, toy: $('fToy').value, skill: $('fSkill').value, persona: $('fPersona').value });
-async function makeMaster() {
-  await busy('กำลังสร้างภาพ Master (ประมาณ 30-90 วินาที)…', async (signal) => {
+async function makeMaster(chained = false) {
+  return busy((chained ? 'ขั้นที่ 1/2: ' : '') + 'กำลังสร้างภาพ Master (ประมาณ 30-90 วินาที)…', async (signal) => {
     const photos = SLOTS.map((k) => S.photos[k]).filter(Boolean);
     if (!photos.length) throw new AppError('ถ่ายหรือเลือกรูปต้นแบบอย่างน้อย 1 รูป');
     budget('chibi');
@@ -260,16 +260,24 @@ async function makeMaster() {
     $('masterImg').src = urlOf(r.png);
     $('masterInfo').textContent = (r.cost != null ? `ค่าใช้จ่ายภาพนี้ ${money(r.cost)} · ` : 'ไม่ทราบค่าใช้จ่ายของภาพนี้ · ') + `พื้นหลัง sprite sheet จะใช้สี${S.bg === 'magenta' ? 'ชมพู (ตัวละครมีสีเขียวมาก)' : 'เขียว'}`;
     hideFrom(3); show('step2');
+    return true;
   }, { long: true });
 }
-$('goMaster').onclick = makeMaster;
-$('reMaster').onclick = makeMaster;
+// v62.1: "สร้างภาพเคลื่อนไหว" = Master, then the sprite sheet right away (one cost question for both)
+async function makeAll() {
+  const a = aiSet();
+  if (!confirm(`สร้างภาพเคลื่อนไหว: ภาพ Master แล้วต่อด้วย sprite sheet (${a.sheetSize}, ${a.quality})\nค่าใช้จ่ายโดยประมาณ: Master $0.2-0.3 + sheet ${SHEET_COST[a.sheetSize] || '$0.4-0.8'}\nใช้เวลารวม 2-4 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?`)) return;
+  if (await makeMaster(true)) await makeSheet(true);
+}
+$('goMaster').onclick = () => makeAll();
+$('reMaster').onclick = () => makeMaster(false);
 
 // ---------- step 2 -> sheet -> cut ----------
-async function makeSheet() {
+const SHEET_COST = { '1024x1536': '$0.4-0.8', '1440x2160': '$0.8-1.6', '2048x2560': '$1.5-3' };
+async function makeSheet(chained = false) {
   const a = aiSet();
-  if (!confirm(`สร้าง sprite sheet (${a.sheetSize}, ${a.quality})\nค่าใช้จ่ายโดยประมาณ ${{ '1024x1536': '$0.4-0.8', '1440x2160': '$0.8-1.6', '2048x2560': '$1.5-3' }[a.sheetSize] || '$0.4-0.8'} ต่อครั้ง\nใช้เวลา 1-3 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?`)) return;
-  await busy('กำลังสร้าง sprite sheet (อาจใช้ 1-3 นาที)…', async (signal) => {
+  if (!chained && !confirm(`สร้าง sprite sheet (${a.sheetSize}, ${a.quality})\nค่าใช้จ่ายโดยประมาณ ${SHEET_COST[a.sheetSize] || '$0.4-0.8'} ต่อครั้ง\nใช้เวลา 1-3 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?`)) return;
+  await busy((chained ? 'ขั้นที่ 2/2: ' : '') + 'กำลังสร้าง sprite sheet (อาจใช้ 1-3 นาที)…', async (signal) => {
     if (!S.master) throw new AppError('ยังไม่มีภาพ Master');
     budget('sheet');
     const t = (x, d) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, 120) : d), f = fields();
@@ -299,8 +307,8 @@ async function cutSheetNow(cost) {
   $('editBox').hidden = !S.cut; $('upload').disabled = !S.cut;
   show('step3');
 }
-$('goSheet').onclick = makeSheet;
-$('reSheet').onclick = makeSheet;
+$('goSheet').onclick = () => makeSheet(false);      // (not the click event: that would skip the cost question)
+$('reSheet').onclick = () => makeSheet(false);
 
 // ---------- step 3: repair poses ----------
 const selected = new Set();
