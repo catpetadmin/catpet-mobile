@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#3d6df2">
+<meta name="referrer" content="no-referrer">
+<title>CatPet มือถือ</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <img src="icon.png" alt="" class="logo">
+  <div><h1>CatPet มือถือ</h1><p class="muted small" id="who">สร้างน้องจากรูป แล้วส่งขึ้นออนไลน์ให้คอมดึงไปใช้</p></div>
+  <button class="linkBtn" id="logoutBtn" type="button" hidden>ออกจากระบบ</button>
+</header>
+
+<main>
+  <!-- server: from the link made in CatPet on the computer (#s=...), or typed once -->
+  <section class="card" id="secServer" hidden>
+    <h2>เชื่อมกับเซิร์ฟเวอร์ CatPet</h2>
+    <p class="muted small">เปิดลิงก์ "หน้ามือถือ" จาก CatPet ในคอม (บัญชี > ใช้บนมือถือ) แล้วจะตั้งค่าให้เอง หรือใส่เองด้านล่าง (Project URL + anon key เท่านั้น)</p>
+    <label>Project URL<input id="srvUrl" inputmode="url" autocomplete="off" placeholder="https://xxxx.supabase.co"></label>
+    <label>anon / publishable key<input id="srvKey" autocomplete="off"></label>
+    <div class="row end"><button class="btn primary" id="srvSave" type="button">บันทึก</button></div>
+  </section>
+
+  <section class="card" id="secLogin" hidden>
+    <h2>ล็อกอิน</h2>
+    <p class="muted small">ใช้อีเมลเดียวกับใน CatPet ที่คอม น้องที่สร้างจะขึ้นเป็นน้องออนไลน์ของบัญชีนี้</p>
+    <label>อีเมล<input id="email" type="email" autocomplete="email" inputmode="email"></label>
+    <div class="row end"><button class="btn" id="sendCode" type="button">ส่งรหัสทางอีเมล</button></div>
+    <label id="codeRow" hidden>รหัสจากอีเมล<input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10"></label>
+    <div class="row end" id="verifyRow" hidden><button class="btn primary" id="verify" type="button">ยืนยัน</button></div>
+  </section>
+
+  <details class="card" id="secAI">
+    <summary><b>ตั้งค่า AI</b> <span class="badge" id="keyBadge">ยังไม่มี key</span></summary>
+    <p class="muted small">ใช้ OpenAI API key ของคุณเอง เก็บไว้ในมือถือเครื่องนี้เท่านั้น (ไม่ส่งไปที่อื่นนอกจาก api.openai.com) แนะนำให้สร้าง project key แยกสำหรับมือถือ และตั้งงบรายเดือนต่ำในหน้า OpenAI</p>
+    <label>OpenAI API key<input id="keyIn" type="password" autocomplete="off" placeholder="sk-..."></label>
+    <label class="check"><input type="checkbox" id="keyRemember" checked> จำ key ไว้ในมือถือเครื่องนี้</label>
+    <div class="row end"><button class="btn small" id="keyDel" type="button">ลบ key</button><button class="btn small primary" id="keySave" type="button">ใช้ key นี้</button></div>
+    <div class="grid2">
+      <label>คุณภาพภาพ<select id="sQuality"><option>high</option><option>medium</option><option>low</option></select></label>
+      <label>ขนาด sprite sheet<select id="sSize"><option value="1024x1536">1024×1536</option><option value="1440x2160">1440×2160 (แนะนำ)</option><option value="2048x2560">2048×2560</option></select></label>
+      <label>เพดานค่าใช้จ่ายต่อตัว (USD)<input id="sCap" type="number" min="0.5" max="50" step="0.5"></label>
+    </div>
+  </details>
+
+  <section class="card consent" id="secConsent" hidden>
+    <h2>ก่อนเริ่ม</h2>
+    <p>ขั้น "สร้างภาพ Master" "สร้าง sprite sheet" และ "แก้ท่า" จะส่งรูปและข้อความ prompt ไปที่ OpenAI (api.openai.com ต่างประเทศ) โดยใช้ key และเครดิตของคุณ รูปอยู่ในหน้าเว็บนี้ระหว่างทำงาน ไม่ได้บันทึกไว้ในมือถือ น้องที่ส่งขึ้นออนไลน์ เพื่อนของคุณจะเห็น</p>
+    <p>ควรใช้รูปตุ๊กตา สัตว์เลี้ยง หรือภาพวาด ถ้าเป็นรูปคน ต้องได้รับอนุญาตจากเจ้าของรูปก่อน</p>
+    <label class="check"><input type="checkbox" id="consentChk"> เข้าใจและยอมรับ</label>
+    <div class="row end"><button class="btn primary" id="consentOk" type="button" disabled>เริ่มใช้งาน</button></div>
+  </section>
+
+  <section class="card step" id="step1" hidden>
+    <h2><span class="num">1</span> ถ่ายรูปต้นแบบ และรายละเอียดน้อง</h2>
+    <div class="slots">
+      <label class="slot" data-slot="front"><input type="file" accept="image/*" capture="environment" hidden><img alt=""><span>หน้า</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
+      <label class="slot" data-slot="side"><input type="file" accept="image/*" capture="environment" hidden><img alt=""><span>ข้าง</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
+      <label class="slot" data-slot="back"><input type="file" accept="image/*" capture="environment" hidden><img alt=""><span>หลัง</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
+    </div>
+    <p class="muted small">แตะช่องเพื่อถ่ายหรือเลือกรูป · ภาษาอังกฤษจะได้ผลแม่นกว่า · ช่องที่เว้นว่างจะใช้ค่าในช่องจางๆ</p>
+    <label>ชื่อน้อง<input id="fName" maxlength="40" placeholder="ตั้งชื่อก่อนส่งขึ้นออนไลน์"></label>
+    <div class="grid2">
+      <label>ของกิน (FOOD)<input id="fFood" maxlength="120" placeholder="a small fish"></label>
+      <label>ของเล่น (TOY)<input id="fToy" maxlength="120" placeholder="a ball of yarn"></label>
+    </div>
+    <label>ท่าไม้ตาย (SKILL) ท่าทางล้วน ไม่มีเอฟเฟกต์<input id="fSkill" maxlength="120" placeholder="a proud spinning victory pose"></label>
+    <label>นิสัย / บุคลิก (PERSONALITY) เว้นว่างได้<input id="fPersona" maxlength="200" placeholder="e.g. always sleepy with half-closed eyes"></label>
+    <div class="row end"><button class="btn primary" id="goMaster" type="button">สร้างภาพ Master</button></div>
+  </section>
+
+  <section class="card step" id="step2" hidden>
+    <h2><span class="num">2</span> ภาพ Master</h2>
+    <div class="bigImg"><img id="masterImg" alt="ภาพ Master"></div>
+    <p class="muted small" id="masterInfo"></p>
+    <div class="row end"><button class="btn" id="reMaster" type="button">สร้าง Master ใหม่</button><button class="btn primary" id="goSheet" type="button">สร้าง sprite sheet</button></div>
+  </section>
+
+  <section class="card step" id="step3" hidden>
+    <h2><span class="num">3</span> ตรวจท่าทาง แล้วส่งขึ้นออนไลน์</h2>
+    <details><summary class="small">ดู sprite sheet ต้นฉบับ</summary><div class="bigImg"><img id="sheetImg" alt="sprite sheet"></div></details>
+    <div id="cutWarn" class="warnBox" hidden></div>
+    <p class="muted small">แตะภาพเพื่อเลือกภาพที่จะแก้ แล้วพิมพ์อธิบายด้านล่าง</p>
+    <div id="gallery" class="gallery"></div>
+    <div class="editBox" id="editBox">
+      <div class="editHead"><b>แก้เฉพาะภาพที่เลือก</b> <span id="selCount" class="badge">ยังไม่ได้เลือก</span></div>
+      <textarea id="editText" rows="2" maxlength="600" placeholder="เช่น make the smile bigger"></textarea>
+      <div class="row end"><button class="btn small" id="selNone" type="button">ล้างที่เลือก</button><button class="btn small primary" id="editGo" type="button" disabled>แก้ภาพที่เลือก</button></div>
+    </div>
+    <div class="row end"><button class="btn" id="reSheet" type="button">สร้าง sheet ใหม่</button><button class="btn primary" id="upload" type="button">ส่งขึ้นออนไลน์</button></div>
+  </section>
+
+  <section class="card" id="secDone" hidden>
+    <h2>ส่งขึ้นออนไลน์แล้ว</h2>
+    <p id="doneText"></p>
+    <p class="muted small">ที่คอม: เปิด CatPet > Pets จะเห็นหัวข้อ "น้องออนไลน์ที่ยังไม่มีในเครื่องนี้" กด "ดาวน์โหลดมาไว้ในเครื่องนี้" (ปรับขนาด / หน้าหัน ทำต่อในคอมได้)</p>
+    <div class="row end"><button class="btn primary" id="again" type="button">สร้างตัวใหม่</button></div>
+  </section>
+
+  <p id="err" class="errBox" hidden></p>
+</main>
+
+<div id="busy" class="busy" hidden>
+  <div class="spin"></div><span id="busyText">กำลังทำงาน…</span>
+  <p class="small" id="busyHint">เปิดหน้าจอค้างไว้ อย่าสลับไปแอปอื่นจนกว่าจะเสร็จ</p>
+  <button class="btn small" id="cancelRun" type="button">ยกเลิก</button>
+</div>
+<footer class="spentBar"><span id="spent">ใช้ไปแล้ว $0.00</span></footer>
+
+<script src="gen/catpet-shared.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
