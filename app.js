@@ -1,16 +1,17 @@
 // v62: CatPet phone page. Same steps as "สร้างน้องจากรูป" on the computer, all in the phone's browser:
-// photos + name / food / toy / skill / personality -> Master (OpenAI) -> sprite sheet (OpenAI) -> cut (app/sheetcut.js)
-// -> repair poses (OpenAI) -> upload as an online pet (Supabase, same SQL rules as the app). The computer then downloads it.
-// Kept on this phone (localStorage): server URL + anon key (public), the login session, the OpenAI key (only if "remember"),
-// AI settings. Photos and pictures live in memory only. The OpenAI key goes to api.openai.com only.
+// photos + name / food / toy / skill / personality -> Master -> sprite sheet -> cut (app/sheetcut.js) -> repair poses
+// -> upload as an online pet (Supabase, same SQL rules as the app). The computer then downloads it.
+// v68.1: the pictures are made by the CatPet server (AI Studio, SQL 011 + Edge Function 'ai-job', the owner's OpenAI key),
+// exactly like the computer: users pay diamonds, Admin / Dev may tick "free". No OpenAI key on the phone any more.
+// Kept on this phone (localStorage): server URL + anon key (public), the login session, "free" (staff). Photos and
+// pictures live in memory only.
 'use strict';
 const $ = (id) => document.getElementById(id);
 const SH = window.CatPetShared, CUT = SH.SheetCut;
-const T = window.CATPET_TEST || {};                         // tests only: { oaiBase }
-const OAI = T.oaiBase || 'https://api.openai.com/v1';
+const T = window.CATPET_TEST || {};                         // tests only: { pollMs, busyMs }
+const PLATFORM = 'web', VERSION = SH.version;
 const SLOTS = ['front', 'side', 'back'];
 const BG = { green: { hex: '#00FF00', name: 'pure bright green', rgb: [0, 255, 0] }, magenta: { hex: '#FF00FF', name: 'pure magenta', rgb: [255, 0, 255] } };
-const EST = { chibi: 0.3, edit: 0.08 }, SHEET_EST = { '1024x1536': 0.8, '1440x2160': 1.6, '2048x2560': 3 };
 const MAX_EDIT = 10, EDIT_SIZE = 1024;
 
 // ---------- storage ----------
@@ -18,13 +19,11 @@ const store = {
   get(k, d = null) { try { const v = localStorage.getItem('catpet.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { if (v == null) localStorage.removeItem('catpet.' + k); else localStorage.setItem('catpet.' + k, JSON.stringify(v)); } catch (e) {} }
 };
-let memKey = null;                                         // the OpenAI key when "remember" is off
-const openaiKey = () => memKey || store.get('openai');
-const aiSet = () => ({ quality: SH.AI_DEFAULTS.quality, sheetSize: SH.AI_DEFAULTS.sheetSize, capUsd: SH.AI_DEFAULTS.capUsd, ...(store.get('ai') || {}) });
+store.set('openai', null); store.set('ai', null);           // v68.1: a key / AI settings kept by an older page are removed
 
 // ---------- session state (memory only) ----------
 let S = null;
-const newSession = () => ({ photos: {}, master: null, bg: 'green', sheet: null, cut: null, orig: {}, spent: 0, unknownCost: false, costs: {} });
+const newSession = () => ({ photos: {}, master: null, bg: 'green', sheet: null, cut: null, orig: {} });
 
 // ---------- errors / busy ----------
 class AppError extends Error { constructor(m, kind = 'error', detail = '') { super(m); this.kind = kind; this.detail = detail; } }
@@ -33,7 +32,6 @@ function showErr(e) {
   if (!e) { box.hidden = true; box.textContent = ''; return; }
   box.textContent = e.message + (e.detail ? '\n(รายละเอียด: ' + String(e.detail).slice(0, 300) + ')' : '');
   box.hidden = false; box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  if (['nokey', 'auth-openai', 'cap'].includes(e.kind)) $('secAI').open = true;
 }
 let run = null, wake = null;
 async function busy(text, fn, { long = false } = {}) {
@@ -50,14 +48,6 @@ $('cancelRun').onclick = () => { if (run) run.abort(); };
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && run && navigator.wakeLock && !wake) navigator.wakeLock.request('screen').then((w) => (wake = w)).catch(() => {});
 });
-const money = (v) => '$' + (v || 0).toFixed(2);
-function setSpent() { $('spent').textContent = `ใช้ไปแล้วสำหรับตัวนี้ ${money(S.spent)} (ประมาณ)` + (S.unknownCost ? ' + บางคำขอไม่ทราบราคา' : '') + ` · เพดาน ${money(aiSet().capUsd)}`; }
-function budget(what) {
-  const est = S.costs[what] || (what === 'sheet' ? SHEET_EST[aiSet().sheetSize] || 0.8 : EST[what]);
-  if (S.spent + est > aiSet().capUsd) throw new AppError(`เกินเพดานค่าใช้จ่ายต่อตัว (${money(aiSet().capUsd)}) ใช้ไปแล้ว ${money(S.spent)} ปรับเพดานได้ใน "ตั้งค่า AI"`, 'cap');
-}
-function spend(what, cost) { if (cost == null) S.unknownCost = true; else { S.spent += cost; S.costs[what] = cost; } setSpent(); }
-
 // ---------- server (Supabase over plain HTTPS, like app/online.js) ----------
 function jwtRole(k) { try { return JSON.parse(atob(k.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role; } catch (e) { return null; } }
 function checkServer(url, anonKey) {
@@ -75,7 +65,7 @@ async function sb(method, p, { body, headers = {}, auth = true, raw = false, tim
   const c = server(); if (!c) throw new AppError('ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์');
   if (auth) await freshSession();
   const h = { apikey: c.anonKey, Authorization: 'Bearer ' + (auth ? session().access_token : c.anonKey), ...headers };
-  if (body !== undefined && !(body instanceof Blob) && typeof body !== 'string') { h['Content-Type'] = 'application/json'; body = JSON.stringify(body); }
+  if (body !== undefined && !(body instanceof Blob) && !(body instanceof FormData) && typeof body !== 'string') { h['Content-Type'] = 'application/json'; body = JSON.stringify(body); }
   let res;
   try { res = await fetch(c.url + p, { method, headers: h, body, signal: AbortSignal.timeout(timeout) }); }
   catch (e) { throw new AppError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ (ตรวจอินเทอร์เน็ต)', 'net'); }
@@ -103,45 +93,90 @@ function toSession(d) {
 }
 const rpc = (fn, args = {}) => sb('POST', '/rest/v1/rpc/' + fn, { body: args });
 
-// ---------- OpenAI (images/edits only), with the app's retries and messages ----------
-async function oai(pathname, fd, signal) {
-  const key = openaiKey(); if (!key) throw new AppError('ใส่ OpenAI API key ใน "ตั้งค่า AI" ก่อน', 'nokey');
-  let last;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt) await new Promise((r, j) => { const t = setTimeout(r, attempt * 4000); signal.addEventListener('abort', () => { clearTimeout(t); j(new AppError('ยกเลิกแล้ว', 'cancel')); }, { once: true }); });
-    let res;
-    try { res = await fetch(OAI + pathname, { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: fd, signal }); }
-    catch (e) { if (signal.aborted) throw new AppError('ยกเลิกแล้ว', 'cancel'); last = new AppError('เชื่อมต่อ api.openai.com ไม่ได้ (ถ้าหน้าจอดับหรือสลับแอประหว่างรอ การเชื่อมต่ออาจหลุด ลองใหม่โดยเปิดจอค้างไว้)', 'net'); continue; }
-    const text = await res.text(); let body = null; try { body = JSON.parse(text); } catch (e) {}
-    if (res.ok) return body;
-    const msg = (body && body.error && body.error.message) || text.slice(0, 300) || res.statusText, code = body && body.error && (body.error.code || body.error.type);
-    if (res.status === 401) throw new AppError('OpenAI API key ไม่ถูกต้องหรือถูกยกเลิก', 'auth-openai', msg);
-    if (res.status === 403) throw new AppError('บัญชีนี้ยังใช้โมเดลนี้ไม่ได้ (อาจต้องทำ Organization Verification ในหน้า OpenAI)', 'forbidden', msg);
-    if (res.status === 429 && /quota|billing|credit/i.test(msg + code)) throw new AppError('เครดิต OpenAI หมดหรือยังไม่ได้ตั้งการชำระเงิน', 'quota', msg);
-    if (res.status === 400 && /safety|policy|moderation|content/i.test(msg + code)) throw new AppError('OpenAI ปฏิเสธคำขอนี้ตามนโยบายเนื้อหา', 'policy', msg);
-    if (res.status === 429 || res.status >= 500) { last = new AppError(`OpenAI ไม่ว่าง (${res.status}) ลองใหม่อีกครั้ง`, 'busy', msg); continue; }
-    throw new AppError(`OpenAI แจ้งข้อผิดพลาด (${res.status})`, 'api', msg);
+// ---------- AI Studio (v68.1): the CatPet server makes the pictures, like app/aistudio.js on the computer ----------
+let srv = null, usedDia = 0;                                // srv = ai_studio_state (+ reason when off)
+const studioReset = () => { srv = null; }, studioKnown = () => !!srv;   // (render() has its own "srv" = the server address)
+const freeOn = () => !!(srv && srv.staff && store.get('staffFree') !== false);
+const price = (k) => (freeOn() ? 0 : srv && srv.price && srv.price[k] != null ? srv.price[k] : 0);
+const REASON = { off: 'บัญชีนี้ยังสร้างน้องด้วย AI ไม่ได้ (ยังไม่เปิดให้ทุกคน)', no011: 'เซิร์ฟเวอร์ยังไม่มี AI Studio (ผู้ดูแลระบบ)', net: 'ต่อเน็ตไม่ได้ ตอนนี้สร้างน้องด้วย AI ไม่ได้',
+  update: 'กรุณาโหลดหน้านี้ใหม่ (มีเวอร์ชันใหม่)', error: 'ตรวจ AI Studio ไม่ได้' };
+const studioReason = () => (!srv ? 'กำลังตรวจ AI Studio…' : (REASON[srv.reason] || REASON.error) + (srv.reason === 'error' && srv.error ? ': ' + srv.error : ''));
+async function refreshStudio() {
+  try { srv = await rpc('ai_studio_state', { p_platform: PLATFORM, p_version: VERSION }); srv.reason = srv.on ? null : 'off'; }
+  catch (e) {
+    srv = { on: false, error: e.message, reason: e.kind === 'net' ? 'net' : /ai_studio_state|could not find|PGRST202|does not exist/i.test(e.message + ' ' + (e.detail || '')) ? 'no011' : /อัพเดต/.test(e.message) ? 'update' : 'error' };
   }
-  throw last;
+  renderStudio();
 }
-function imageCost(u) {
-  if (!u || u.output_tokens == null) return null;
-  const p = SH.AI_DEFAULTS.price, d = u.input_tokens_details || {};
-  const img = d.image_tokens != null ? d.image_tokens : 0, txt = d.text_tokens != null ? d.text_tokens : Math.max(0, (u.input_tokens || 0) - img);
-  return (txt * p.textIn + img * p.imageIn + u.output_tokens * p.imageOut) / 1e6;
+function renderStudio() {
+  const on = !!(srv && srv.on), box = $('srvInfo');
+  $('freeRow').hidden = !(on && srv.staff); $('freeChk').checked = freeOn();
+  box.classList.toggle('off', !on);
+  box.textContent = !on ? studioReason() : freeOn() ? `สร้างฟรี (${srv.role === 'admin' ? 'Admin' : 'Dev'}) ไม่หักเพชร ไม่มีเพดานต่อวัน`
+    : `ราคา: ภาพ Master ${price('chibi')} 💎 · sprite sheet ${price('sheet')} 💎 · แก้ท่าละ ${price('edit')} 💎` + (srv.daily_cap != null ? ` · วันนี้ใช้ไป ${srv.today || 0}/${srv.daily_cap} งาน` : '') +
+      ` · มี ${srv.diamond || 0} 💎 · ถ้าสร้างไม่สำเร็จ คืนเพชรให้อัตโนมัติ`;
+  for (const id of ['goMaster', 'reMaster', 'goSheet', 'reSheet']) $(id).disabled = !on;
+  syncSel(); setSpent();
 }
-async function editImage({ images, prompt, size }, signal) {
-  const fd = new FormData();
-  fd.append('model', SH.AI_DEFAULTS.imageModel); fd.append('prompt', prompt); fd.append('size', size);
-  fd.append('quality', aiSet().quality); fd.append('background', 'opaque'); fd.append('output_format', 'png'); fd.append('n', '1');
-  images.forEach((b, i) => fd.append('image[]', b, `ref_${i + 1}.${b.type === 'image/png' ? 'png' : 'jpg'}`));
-  const body = await oai('/images/edits', fd, signal);
-  const b64 = body && body.data && body.data[0] && body.data[0].b64_json;
-  if (!b64) throw new AppError('OpenAI ไม่ได้ส่งภาพกลับมา', 'api');
-  const bin = atob(b64), u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-  return { png: new Blob([u8], { type: 'image/png' }), cost: imageCost(body.usage) };
+function setSpent() { $('spent').textContent = freeOn() ? 'สร้างฟรี' : `ใช้ไปแล้วสำหรับตัวนี้ ${usedDia} 💎 · เหลือ ${(srv && srv.diamond) || 0} 💎`; }
+function needDia(n) {
+  if (!(srv && srv.on)) { showErr(new AppError(studioReason())); return false; }
+  if (freeOn()) return true;
+  const have = (srv && srv.diamond) || 0;
+  if (have < n) { showErr(new AppError(`เพชรไม่พอ ต้องใช้ ${n} 💎 มี ${have} 💎`)); return false; }
+  return true;
 }
-const fill = (tpl, v) => tpl.replace(/\{\{(\w+)\}\}/g, (m, k) => (v[k] != null ? String(v[k]) : m));
+const diaAsk = (n, what) => (freeOn() ? `${what} (สร้างฟรี ไม่หักเพชร)` : `${what} ใช้ ${n} 💎 (มี ${(srv && srv.diamond) || 0} 💎)\nถ้าสร้างไม่สำเร็จ คืนเพชรให้อัตโนมัติ`);
+const pause = (ms, signal) => new Promise((ok, no) => {
+  if (signal.aborted) return no(new AppError('ยกเลิกแล้ว', 'cancel'));
+  const t = setTimeout(ok, ms); signal.addEventListener('abort', () => { clearTimeout(t); no(new AppError('ยกเลิกแล้ว', 'cancel')); }, { once: true });
+});
+// one picture: ai_job_submit (diamonds taken, same UUID = same job) -> pictures to the Edge Function -> wait -> download + delete
+async function studioRun(kind, images, params, signal) {
+  const id = crypto.randomUUID(), t0 = Date.now();
+  let sub;
+  for (let tries = 0; ; tries++) {
+    try { sub = await rpc('ai_job_submit', { p_job: id, p_kind: kind, p_params: params, p_inputs: images.length, p_platform: PLATFORM, p_version: VERSION, ...(freeOn() ? { p_free: true } : {}) }); break; }
+    catch (e) { if (e.kind !== 'net' || tries >= 2) throw e; await pause(3000 * (tries + 1), signal); }
+  }
+  let job = sub.job; srv.diamond = sub.diamond; renderStudio();
+  const cancel = async (msg) => {
+    try { const r = await rpc('ai_job_cancel', { p_job: id }); job = r.job; srv.diamond = r.diamond; renderStudio(); } catch (e) {}
+    return job && job.status === 'running' ? new AppError('หยุดรอแล้ว แต่งานนี้กำลังสร้างอยู่บนเซิร์ฟเวอร์ (ใช้เพชรไปแล้ว)') : new AppError(msg, msg === 'ยกเลิกแล้ว' ? 'cancel' : 'error');
+  };
+  for (let tries = 0; ; tries++) {
+    if (signal.aborted) throw await cancel('ยกเลิกแล้ว');
+    const fd = new FormData(); fd.append('job', id);
+    images.forEach((b, i) => fd.append('image', b, `in_${i + 1}.${b.type === 'image/png' ? 'png' : 'jpg'}`));
+    let r;
+    try { r = await sb('POST', '/functions/v1/ai-job', { body: fd, timeout: 90000 }); }
+    catch (e) {
+      if (e.kind === 'net' && tries < 3) { await pause(3000 * (tries + 1), signal).catch(() => {}); continue; }
+      const why = /[฀-๿]/.test(e.detail || '') ? e.detail : /not.?found|404/i.test(e.message + ' ' + (e.detail || '')) ? 'เซิร์ฟเวอร์ยังไม่ได้ติดตั้ง AI Studio (แจ้งผู้ดูแลระบบ)' : e.message;
+      throw await cancel(why + ' (คืนเพชรแล้ว ถ้ายังไม่ได้เริ่มสร้าง)');
+    }
+    if (r && r.status === 'busy') {
+      if (Date.now() - t0 > 12 * 60000) throw await cancel('คิว AI ยาวเกินไป ลองใหม่ภายหลัง (คืนเพชรแล้ว)');
+      try { await pause(T.busyMs != null ? T.busyMs : Math.max(1, r.retry_after || 10) * 1000, signal); } catch (e) { throw await cancel('ยกเลิกแล้ว'); }
+      continue;
+    }
+    if (r && r.job) job = r.job;
+    break;
+  }
+  while (!['done', 'failed', 'cancelled'].includes(job.status)) {
+    try { await pause(T.pollMs || 4000, signal); } catch (e) { throw await cancel('ยกเลิกแล้ว'); }
+    if (Date.now() - t0 > 13 * 60000) throw new AppError('รอนานเกินไป ถ้างานไม่สำเร็จ เซิร์ฟเวอร์จะคืนเพชรให้เอง');
+    try { const st = await rpc('ai_job_status', { p_jobs: [id] }); if (st.jobs && st.jobs[0]) job = st.jobs[0]; srv.diamond = st.diamond; } catch (e) { if (e.kind !== 'net') throw e; }
+  }
+  if (job.status !== 'done') { renderStudio(); throw new AppError(job.error || 'สร้างภาพไม่สำเร็จ คืนเพชรให้แล้ว', 'failed'); }
+  const res = await sb('GET', '/storage/v1/object/authenticated/ai-results/' + job.result, { raw: true, timeout: 120000 });
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.length < 8 || buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) throw new AppError('ภาพที่ได้จากเซิร์ฟเวอร์เปิดไม่ได้');
+  sb('DELETE', '/storage/v1/object/ai-results', { body: { prefixes: [job.result] } }).catch(() => {});   // not kept on the server
+  srv.today = (srv.today || 0) + 1; usedDia += job.price || 0; renderStudio();
+  return { png: new Blob([buf], { type: 'image/png' }), price: job.price || 0 };
+}
+const paidText = (r) => (r.price ? `ใช้ ${r.price} 💎 · ` : 'สร้างฟรี · ');
 
 // ---------- pictures (canvas) ----------
 const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
@@ -192,12 +227,10 @@ function render() {
   $('logoutBtn').hidden = !ready;
   $('who').textContent = ready ? `ล็อกอินเป็น ${sess.email || ''}` : 'สร้างน้องจากรูป แล้วส่งขึ้นออนไลน์ให้คอมดึงไปใช้';
   $('secAI').hidden = !ready;
+  if (!ready) studioReset(); else if (!studioKnown()) refreshStudio();
   $('secConsent').hidden = !ready || consent;
   $('step1').hidden = !ready || !consent || !$('secDone').hidden;
-  const k = openaiKey(); $('keyBadge').textContent = k ? 'มี key …' + k.slice(-4) + (memKey ? ' (ไม่ได้จำ)' : '') : 'ยังไม่มี key'; $('keyBadge').classList.toggle('ok', !!k);
-  if (ready && !k) $('secAI').open = true;
-  const a = aiSet(); $('sQuality').value = a.quality; $('sSize').value = a.sheetSize; $('sCap').value = a.capUsd;
-  setSpent();
+  renderStudio();
 }
 // server from the computer's link: #s=<base64url of {"url":..,"anonKey":..}> (the fragment never reaches a web server)
 (function serverFromLink() {
@@ -220,17 +253,8 @@ $('verify').onclick = () => busy('กำลังยืนยัน…', async (
   await rpc('ensure_profile', { p_display_name: null });
   render();
 });
-$('logoutBtn').onclick = async () => { try { await sb('POST', '/auth/v1/logout', {}); } catch (e) {} store.set('session', null); render(); };
-$('keySave').onclick = () => {
-  const k = $('keyIn').value.trim(); $('keyIn').value = '';
-  if (!/^sk-[\w\-]{20,300}$/.test(k)) return showErr(new AppError('รูปแบบ key ไม่ถูกต้อง (ต้องขึ้นต้นด้วย sk-)'));
-  if ($('keyRemember').checked) { store.set('openai', k); memKey = null; } else { store.set('openai', null); memKey = k; }
-  showErr(null); render();
-};
-$('keyDel').onclick = () => { store.set('openai', null); memKey = null; render(); };
-for (const id of ['sQuality', 'sSize', 'sCap']) $(id).onchange = () => {
-  const cap = Number($('sCap').value); store.set('ai', { quality: $('sQuality').value, sheetSize: $('sSize').value, capUsd: isFinite(cap) && cap >= 0.5 && cap <= 50 ? cap : SH.AI_DEFAULTS.capUsd }); render();
-};
+$('logoutBtn').onclick = async () => { try { await sb('POST', '/auth/v1/logout', {}); } catch (e) {} store.set('session', null); srv = null; render(); };
+$('freeChk').onchange = () => { store.set('staffFree', $('freeChk').checked); renderStudio(); };   // v68.1: Admin / Dev only (the server checks)
 $('consentChk').onchange = () => { $('consentOk').disabled = !$('consentChk').checked; };
 $('consentOk').onclick = () => { store.set('consent', true); render(); };
 
@@ -250,50 +274,41 @@ async function makeMaster(chained = false) {
   return busy((chained ? 'ขั้นที่ 1/2: ' : '') + 'กำลังสร้างภาพ Master (ประมาณ 30-90 วินาที)…', async (signal) => {
     const photos = SLOTS.map((k) => S.photos[k]).filter(Boolean);
     if (!photos.length) throw new AppError('ถ่ายหรือเลือกรูปต้นแบบอย่างน้อย 1 รูป');
-    budget('chibi');
     let share = 0; for (const p of photos) share = Math.max(share, await greenShare(p));
     S.bg = share > 0.06 ? 'magenta' : 'green';
-    const prompt = fill(SH.PROMPTS.chibi, { BG: BG[S.bg].hex, BGNAME: BG[S.bg].name, PERSONALITY: SH.personaLine(fields().persona, false) });
-    const r = await editImage({ images: photos, prompt, size: SH.AI_DEFAULTS.chibiSize }, signal);
-    spend('chibi', r.cost);
+    const r = await studioRun('chibi', photos, { bg: S.bg, persona: fields().persona.slice(0, 200) }, signal);
     S.master = r.png; S.cut = null;
     $('masterImg').src = urlOf(r.png);
-    $('masterInfo').textContent = (r.cost != null ? `ค่าใช้จ่ายภาพนี้ ${money(r.cost)} · ` : 'ไม่ทราบค่าใช้จ่ายของภาพนี้ · ') + `พื้นหลัง sprite sheet จะใช้สี${S.bg === 'magenta' ? 'ชมพู (ตัวละครมีสีเขียวมาก)' : 'เขียว'}`;
+    $('masterInfo').textContent = paidText(r) + `พื้นหลัง sprite sheet จะใช้สี${S.bg === 'magenta' ? 'ชมพู (ตัวละครมีสีเขียวมาก)' : 'เขียว'}`;
     hideFrom(3); show('step2');
     return true;
   }, { long: true });
 }
 // v62.1: "สร้างภาพเคลื่อนไหว" = Master, then the sprite sheet right away (one cost question for both)
 async function makeAll() {
-  const a = aiSet();
-  if (!confirm(`สร้างภาพเคลื่อนไหว: ภาพ Master แล้วต่อด้วย sprite sheet (${a.sheetSize}, ${a.quality})\nค่าใช้จ่ายโดยประมาณ: Master $0.2-0.3 + sheet ${SHEET_COST[a.sheetSize] || '$0.4-0.8'}\nใช้เวลารวม 2-4 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?`)) return;
+  const n = price('chibi') + price('sheet');
+  if (!needDia(n) || !confirm(diaAsk(n, freeOn() ? 'สร้างภาพเคลื่อนไหว: ภาพ Master แล้วต่อด้วย sprite sheet' : `สร้างภาพเคลื่อนไหว: ภาพ Master (${price('chibi')} 💎) แล้วต่อด้วย sprite sheet (${price('sheet')} 💎)\nรวม`) + '\nใช้เวลารวม 2-4 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?')) return;
   if (await makeMaster(true)) await makeSheet(true);
 }
 $('goMaster').onclick = () => makeAll();
-$('reMaster').onclick = () => makeMaster(false);
+$('reMaster').onclick = () => { if (needDia(price('chibi')) && confirm(diaAsk(price('chibi'), 'สร้างภาพ Master ใหม่') + '\n\nทำต่อไหม?')) makeMaster(false); };
 
 // ---------- step 2 -> sheet -> cut ----------
-const SHEET_COST = { '1024x1536': '$0.4-0.8', '1440x2160': '$0.8-1.6', '2048x2560': '$1.5-3' };
 async function makeSheet(chained = false) {
-  const a = aiSet();
-  if (!chained && !confirm(`สร้าง sprite sheet (${a.sheetSize}, ${a.quality})\nค่าใช้จ่ายโดยประมาณ ${SHEET_COST[a.sheetSize] || '$0.4-0.8'} ต่อครั้ง\nใช้เวลา 1-3 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?`)) return;
+  if (!chained && (!needDia(price('sheet')) || !confirm(diaAsk(price('sheet'), 'สร้าง sprite sheet') + '\nใช้เวลา 1-3 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?'))) return;
   await busy((chained ? 'ขั้นที่ 2/2: ' : '') + 'กำลังสร้าง sprite sheet (อาจใช้ 1-3 นาที)…', async (signal) => {
     if (!S.master) throw new AppError('ยังไม่มีภาพ Master');
-    budget('sheet');
-    const t = (x, d) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, 120) : d), f = fields();
-    const prompt = fill(SH.PROMPTS.sheet, { FOOD: t(f.food, 'a small fish'), EAT: 'eating happily', TOY: t(f.toy, 'a ball of yarn'), SKILL: t(f.skill, 'a proud spinning victory pose'),
-      PERSONALITY: SH.personaLine(f.persona, true), BG: BG[S.bg].hex, BGNAME: BG[S.bg].name });
-    const r = await editImage({ images: [S.master], prompt, size: a.sheetSize }, signal);
-    spend('sheet', r.cost);
+    const f = fields();
+    const r = await studioRun('sheet', [S.master], { bg: S.bg, food: f.food.slice(0, 120), toy: f.toy.slice(0, 120), skill: f.skill.slice(0, 120), persona: f.persona.slice(0, 200) }, signal);
     S.sheet = r.png;
     $('busyText').textContent = 'กำลังตัดเป็นท่า…';
     await new Promise((ok) => setTimeout(ok, 30));
-    await cutSheetNow(r.cost);
+    await cutSheetNow(r);
   }, { long: true });
 }
-async function cutSheetNow(cost) {
+async function cutSheetNow(r) {
   $('sheetImg').src = urlOf(S.sheet);
-  const lines = []; if (cost != null && cost > 0) lines.push(`ค่าใช้จ่าย sheet นี้ ${money(cost)}`);
+  const lines = [r.price ? `ใช้ ${r.price} 💎 สำหรับ sheet นี้` : 'สร้าง sheet นี้ฟรี'];
   S.cut = null; S.orig = {}; selected.clear();
   try {
     const bm = await bgraOfBlob(S.sheet);
@@ -329,29 +344,27 @@ function figure(k) {
 function renderGallery() { const g = $('gallery'); g.textContent = ''; if (S.cut) for (const k of Object.keys(S.cut)) g.appendChild(figure(k)); syncSel(); }
 function syncSel() {
   $('selCount').textContent = selected.size ? `เลือก ${selected.size} ภาพ` : 'ยังไม่ได้เลือก';
-  $('selCount').classList.toggle('ok', selected.size > 0); $('editGo').disabled = !selected.size;
+  $('selCount').classList.toggle('ok', selected.size > 0); $('editGo').disabled = !selected.size || !(srv && srv.on);
 }
 $('selNone').onclick = () => { selected.clear(); renderGallery(); };
 $('editGo').onclick = async () => {
   const text = $('editText').value.trim().slice(0, 600), keys = [...selected];
   if (!text) { $('editText').focus(); return showErr(new AppError('พิมพ์อธิบายว่าจะแก้อะไร')); }
   if (keys.length > MAX_EDIT) return showErr(new AppError(`แก้ได้ครั้งละไม่เกิน ${MAX_EDIT} ภาพ`));
-  if (!confirm(`แก้ ${keys.length} ภาพ ส่งไป OpenAI ${keys.length} คำขอ\nทำต่อไหม?`)) return;
+  const n = keys.length * price('edit');
+  if (!needDia(n) || !confirm(diaAsk(n, freeOn() ? `แก้ ${keys.length} ภาพ` : `แก้ ${keys.length} ภาพ ภาพละ ${price('edit')} 💎\nรวม`) + '\n\nทำต่อไหม?')) return;
   await busy(`กำลังแก้ ${keys.length} ภาพ (ภาพละประมาณ 20-60 วินาที)…`, async (signal) => {
     let ok = 0, failure = null;
     for (const k of keys) {
       try {
-        budget('edit');
         const images = [await poseOnBackground(S.cut[k].png)]; if (S.master) images.push(S.master);
-        const prompt = fill(SH.PROMPTS.edit, { POSE: k, CHANGE: text, BG: BG[S.bg].hex, BGNAME: BG[S.bg].name });
-        const r = await editImage({ images, prompt, size: EDIT_SIZE + 'x' + EDIT_SIZE }, signal);
-        spend('edit', r.cost);
+        const r = await studioRun('edit', images, { bg: S.bg, pose: k, change: text }, signal);
         const ref = await bgraOfBlob((S.orig[k] || S.cut[k]).png), bm = CUT.cutOne(await bgraOfBlob(r.png), ref);
         if (!S.orig[k]) S.orig[k] = S.cut[k];
         S.cut[k] = { png: await pngOfBgra(bm), w: bm.w, h: bm.h }; selected.delete(k); ok++;
       } catch (e) {
         failure = new AppError(`แก้ ${k} ไม่สำเร็จ: ${e.message}`, e.kind, e.detail);
-        if (['cancel', 'cap', 'auth-openai', 'quota', 'nokey'].includes(e.kind)) break;
+        if (['cancel', 'rule', 'auth', 'net'].includes(e.kind)) break;   // rule = no diamonds / daily cap
       }
     }
     renderGallery();
@@ -387,9 +400,9 @@ $('again').onclick = () => {
   S = newSession();
   for (const el of document.querySelectorAll('.slot')) { el.classList.remove('has'); el.querySelector('img').removeAttribute('src'); }
   for (const id of ['fName', 'fFood', 'fToy', 'fSkill', 'fPersona', 'editText']) $(id).value = '';
-  $('secDone').hidden = true; hideFrom(2); render(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  $('secDone').hidden = true; hideFrom(2); usedDia = 0; render(); window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 S = newSession();
 render();
-window.__mobile = { get S() { return S; }, store };       // tests
+window.__mobile = { get S() { return S; }, get srv() { return srv; }, store };       // tests

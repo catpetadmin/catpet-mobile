@@ -37,22 +37,16 @@
     <div class="row end" id="verifyRow" hidden><button class="btn primary" id="verify" type="button">ยืนยัน</button></div>
   </section>
 
-  <details class="card" id="secAI">
-    <summary><b>ตั้งค่า AI</b> <span class="badge" id="keyBadge">ยังไม่มี key</span></summary>
-    <p class="muted small">ใช้ OpenAI API key ของคุณเอง เก็บไว้ในมือถือเครื่องนี้เท่านั้น (ไม่ส่งไปที่อื่นนอกจาก api.openai.com) แนะนำให้สร้าง project key แยกสำหรับมือถือ และตั้งงบรายเดือนต่ำในหน้า OpenAI</p>
-    <label>OpenAI API key<input id="keyIn" type="password" autocomplete="off" placeholder="sk-..."></label>
-    <label class="check"><input type="checkbox" id="keyRemember" checked> จำ key ไว้ในมือถือเครื่องนี้</label>
-    <div class="row end"><button class="btn small" id="keyDel" type="button">ลบ key</button><button class="btn small primary" id="keySave" type="button">ใช้ key นี้</button></div>
-    <div class="grid2">
-      <label>คุณภาพภาพ<select id="sQuality"><option>high</option><option>medium</option><option>low</option></select></label>
-      <label>ขนาด sprite sheet<select id="sSize"><option value="1024x1536">1024×1536</option><option value="1440x2160">1440×2160 (แนะนำ)</option><option value="2048x2560">2048×2560</option></select></label>
-      <label>เพดานค่าใช้จ่ายต่อตัว (USD)<input id="sCap" type="number" min="0.5" max="50" step="0.5"></label>
-    </div>
-  </details>
+  <section class="card" id="secAI">
+    <h2>สร้างด้วย AI ของ CatPet</h2>
+    <p class="muted small">จ่ายด้วย diamond ไม่ต้องมี OpenAI key (เหมือนในคอม)</p>
+    <label class="check" id="freeRow" hidden><input type="checkbox" id="freeChk"> สร้างฟรี (Admin / Dev ไม่หักเพชร)</label>
+    <p class="muted small" id="srvInfo">กำลังตรวจ AI Studio…</p>
+  </section>
 
   <section class="card consent" id="secConsent" hidden>
     <h2>ก่อนเริ่ม</h2>
-    <p>ขั้น "สร้างภาพ Master" "สร้าง sprite sheet" และ "แก้ท่า" จะส่งรูปและข้อความ prompt ไปที่ OpenAI (api.openai.com ต่างประเทศ) โดยใช้ key และเครดิตของคุณ รูปอยู่ในหน้าเว็บนี้ระหว่างทำงาน ไม่ได้บันทึกไว้ในมือถือ น้องที่ส่งขึ้นออนไลน์ เพื่อนของคุณจะเห็น</p>
+    <p>ขั้น "สร้างภาพ Master" "สร้าง sprite sheet" และ "แก้ท่า" จะส่งรูปและข้อมูลที่กรอก ผ่านเซิร์ฟเวอร์ CatPet ไปที่ OpenAI (ต่างประเทศ) เซิร์ฟเวอร์ไม่เก็บรูปต้นแบบ ภาพผลลัพธ์ถูกลบจากเซิร์ฟเวอร์หลังส่งมาหน้านี้ รูปอยู่ในหน้าเว็บนี้ระหว่างทำงาน ไม่ได้บันทึกไว้ในมือถือ น้องที่ส่งขึ้นออนไลน์ เพื่อนของคุณจะเห็น</p>
     <p>ควรใช้รูปตุ๊กตา สัตว์เลี้ยง หรือภาพวาด ถ้าเป็นรูปคน ต้องได้รับอนุญาตจากเจ้าของรูปก่อน</p>
     <label class="check"><input type="checkbox" id="consentChk"> เข้าใจและยอมรับ</label>
     <div class="row end"><button class="btn primary" id="consentOk" type="button" disabled>เริ่มใช้งาน</button></div>
@@ -113,7 +107,7 @@
   <p class="small" id="busyHint">เปิดหน้าจอค้างไว้ อย่าสลับไปแอปอื่นจนกว่าจะเสร็จ</p>
   <button class="btn small" id="cancelRun" type="button">ยกเลิก</button>
 </div>
-<footer class="spentBar"><span id="spent">ใช้ไปแล้ว $0.00</span></footer>
+<footer class="spentBar"><span id="spent"></span></footer>
 
 <script src="gen/catpet-shared.js"></script>
 <script src="app.js"></script>
