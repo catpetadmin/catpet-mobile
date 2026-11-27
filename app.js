@@ -379,10 +379,12 @@ $('upload').onclick = async () => {
   const name = $('fName').value.trim().slice(0, 40);
   if (!name) { $('fName').scrollIntoView({ behavior: 'smooth', block: 'center' }); $('fName').focus(); return showErr(new AppError('ตั้งชื่อน้องในขั้นที่ 1 ก่อนส่งขึ้นออนไลน์')); }
   if (!S.cut || !S.cut.idle_01) return showErr(new AppError('ยังไม่มีภาพท่าทาง (ต้องมี idle_01)'));
-  if (!confirm(`ส่ง ${name} ขึ้นออนไลน์? (${Object.keys(S.cut).length} ท่า) เพื่อนของคุณจะเห็น และนับในน้องออนไลน์ของคุณ (สูงสุด 7 ตัว)`)) return;
+  if (!confirm(`ส่ง ${name} เข้าบัญชี? (${Object.keys(S.cut).length} ท่า) คอมทุกเครื่องที่ล็อกอินบัญชีนี้จะได้น้องตัวนี้เอง เพื่อนยังไม่เห็นจนกว่าจะติ๊ก "ให้เพื่อนเห็น" ในหน้า Pets ที่คอม`)) return;   // v74 (C2)
   await busy('กำลังส่งขึ้นออนไลน์…', async () => {
     const keys = Object.keys(S.cut).sort();
-    const reg = await rpc('pet_register', { p_name: name, p_files: keys, p_tweaks: { hand: 'auto', face: 'auto', scale: null }, p_hash: await sha256hex(S.cut.idle_01.png) });
+    const args = { p_name: name, p_files: keys, p_tweaks: { hand: 'auto', face: 'auto', scale: null }, p_hash: await sha256hex(S.cut.idle_01.png) };
+    let reg; try { reg = await rpc('pet_register', { ...args, p_shared: false }); }   // v74: friends do not see it until ticked (owner 2026-11-27)
+    catch (e) { if (!/p_shared|PGRST202|could not find/i.test(String(e && e.message))) throw e; reg = await rpc('pet_register', args); }   // server without 015
     try {
       for (let i = 0; i < keys.length; i++) {
         $('busyText').textContent = `กำลังส่งขึ้นออนไลน์ ${i + 1} / ${keys.length}…`;
