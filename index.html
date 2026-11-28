@@ -55,9 +55,9 @@
   <section class="card step" id="step1" hidden>
     <h2><span class="num">1</span> ถ่ายรูปต้นแบบ และรายละเอียดน้อง</h2>
     <div class="slots">
-      <label class="slot" data-slot="front"><input type="file" accept="image/*" capture="environment" hidden><img alt=""><span>หน้า</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
-      <label class="slot" data-slot="side"><input type="file" accept="image/*" capture="environment" hidden><img alt=""><span>ข้าง</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
-      <label class="slot" data-slot="back"><input type="file" accept="image/*" capture="environment" hidden><img alt=""><span>หลัง</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
+      <label class="slot" data-slot="front"><input type="file" accept="image/*" hidden><img alt=""><span>หน้า</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
+      <label class="slot" data-slot="side"><input type="file" accept="image/*" hidden><img alt=""><span>ข้าง</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
+      <label class="slot" data-slot="back"><input type="file" accept="image/*" hidden><img alt=""><span>หลัง</span><button class="x" type="button" aria-label="เอาออก">×</button></label>
     </div>
     <p class="muted small">แตะช่องเพื่อถ่ายหรือเลือกรูป · ภาษาอังกฤษจะได้ผลแม่นกว่า · ช่องที่เว้นว่างจะใช้ค่าในช่องจางๆ</p>
     <label>ชื่อน้อง<input id="fName" maxlength="40" placeholder="ตั้งชื่อก่อนส่งขึ้นออนไลน์"></label>
@@ -67,6 +67,8 @@
     </div>
     <label>ท่าไม้ตาย (SKILL) ท่าทางล้วน ไม่มีเอฟเฟกต์<input id="fSkill" maxlength="120" placeholder="a proud spinning victory pose"></label>
     <label>นิสัย / บุคลิก (PERSONALITY) เว้นว่างได้<input id="fPersona" maxlength="200" placeholder="e.g. always sleepy with half-closed eyes"></label>
+    <label>ประเภทตัว (ท่าเดินและท่าต่างๆ จะทำตามนี้)<select id="fBody"><option value="auto">ให้ AI ดูจากรูปเอง</option><option value="biped">คน / ตัวละครสองขา</option><option value="quadruped">สัตว์สี่ขา (หมา แมว ฯลฯ)</option><option value="aquatic">ปลา / สัตว์น้ำ (ว่ายแทนเดิน)</option><option value="flying">นก / สัตว์ที่บินได้</option></select></label>
+    <label>ขอแก้จากรูปต้นฉบับ (เว้นว่างได้) เช่น ไม่ใส่หมวก ไม่ถืออาวุธ เปลี่ยนเป็นผู้หญิง<textarea id="fRequest" maxlength="300" rows="2" placeholder="e.g. no hat, no weapon, make it a girl"></textarea></label>
     <p class="muted small">"สร้างภาพเคลื่อนไหว" = สร้างภาพ Master แล้วต่อด้วย sprite sheet ทันที รวม 2-4 นาที เปิดหน้าจอค้างไว้</p>
     <div class="row end"><button class="btn primary" id="goMaster" type="button">สร้างภาพเคลื่อนไหว</button></div>
   </section>

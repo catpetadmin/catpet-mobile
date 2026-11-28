@@ -94,7 +94,7 @@ function toSession(d) {
 const rpc = (fn, args = {}) => sb('POST', '/rest/v1/rpc/' + fn, { body: args });
 
 // ---------- AI Studio (v68.1): the CatPet server makes the pictures, like app/aistudio.js on the computer ----------
-let srv = null, usedDia = 0;                                // srv = ai_studio_state (+ reason when off)
+let srv = null, usedDia = 0, usedUsd = 0;                                // srv = ai_studio_state (+ reason when off)
 const studioReset = () => { srv = null; }, studioKnown = () => !!srv;   // (render() has its own "srv" = the server address)
 const freeOn = () => !!(srv && srv.staff && store.get('staffFree') !== false);
 const price = (k) => (freeOn() ? 0 : srv && srv.price && srv.price[k] != null ? srv.price[k] : 0);
@@ -118,7 +118,17 @@ function renderStudio() {
   for (const id of ['goMaster', 'reMaster', 'goSheet', 'reSheet']) $(id).disabled = !on;
   syncSel(); setSpent();
 }
-function setSpent() { $('spent').textContent = freeOn() ? 'สร้างฟรี' : `ใช้ไปแล้วสำหรับตัวนี้ ${usedDia} 💎 · เหลือ ${(srv && srv.diamond) || 0} 💎`; }
+function setSpent() { $('spent').textContent = (freeOn() ? 'สร้างฟรี' : `ใช้ไปแล้วสำหรับตัวนี้ ${usedDia} 💎 · เหลือ ${(srv && srv.diamond) || 0} 💎`) + (staffUsd() ? ` · ค่าใช้จ่ายจริง ${fmtUsd(usedUsd)}` : ''); }
+// v77 (owner): Admin / Dev see the cost in USD - an estimate before (average of the last jobs) and the real cost after
+const staffUsd = () => !!(srv && srv.staff && srv.usd);
+const fmtUsd = (x) => '$' + (Math.round((Number(x) || 0) * 1000) / 1000).toFixed(3);
+function usdLine(kinds) {
+  if (!staffUsd()) return '';
+  if (!srv.usd.priced) return '\n(Admin/Dev) ค่าใช้จ่าย USD: ยังไม่ได้ตั้งราคา (remote_config ai.price_usd)';
+  const est = kinds.map((k) => (srv.usd.estimate || {})[k]);
+  if (est.some((v) => v == null)) return '\n(Admin/Dev) ค่าใช้จ่ายโดยประมาณ: ยังไม่มีข้อมูลงานก่อนหน้า';
+  return `\n(Admin/Dev) ค่าใช้จ่ายโดยประมาณ ${fmtUsd(est.reduce((a, b) => a + Number(b), 0))}`;
+}
 function needDia(n) {
   if (!(srv && srv.on)) { showErr(new AppError(studioReason())); return false; }
   if (freeOn()) return true;
@@ -126,7 +136,7 @@ function needDia(n) {
   if (have < n) { showErr(new AppError(`เพชรไม่พอ ต้องใช้ ${n} 💎 มี ${have} 💎`)); return false; }
   return true;
 }
-const diaAsk = (n, what) => (freeOn() ? `${what} (สร้างฟรี ไม่หักเพชร)` : `${what} ใช้ ${n} 💎 (มี ${(srv && srv.diamond) || 0} 💎)\nถ้าสร้างไม่สำเร็จ คืนเพชรให้อัตโนมัติ`);
+const diaAsk = (n, what, kinds = []) => (freeOn() ? `${what} (สร้างฟรี ไม่หักเพชร)` : `${what} ใช้ ${n} 💎 (มี ${(srv && srv.diamond) || 0} 💎)\nถ้าสร้างไม่สำเร็จ คืนเพชรให้อัตโนมัติ`) + usdLine(kinds);
 const pause = (ms, signal) => new Promise((ok, no) => {
   if (signal.aborted) return no(new AppError('ยกเลิกแล้ว', 'cancel'));
   const t = setTimeout(ok, ms); signal.addEventListener('abort', () => { clearTimeout(t); no(new AppError('ยกเลิกแล้ว', 'cancel')); }, { once: true });
@@ -173,10 +183,14 @@ async function studioRun(kind, images, params, signal) {
   const buf = new Uint8Array(await res.arrayBuffer());
   if (buf.length < 8 || buf[0] !== 0x89 || buf[1] !== 0x50 || buf[2] !== 0x4e || buf[3] !== 0x47) throw new AppError('ภาพที่ได้จากเซิร์ฟเวอร์เปิดไม่ได้');
   sb('DELETE', '/storage/v1/object/ai-results', { body: { prefixes: [job.result] } }).catch(() => {});   // not kept on the server
+  // v77: the real cost (Admin / Dev): the server writes it a moment after "done"
+  let cost = job.cost_usd;
+  if (staffUsd() && cost == null) { try { await pause(1500, signal); const st = await rpc('ai_job_status', { p_jobs: [id] }); if (st.jobs && st.jobs[0]) cost = st.jobs[0].cost_usd; } catch (e) {} }
+  if (cost != null) usedUsd += Number(cost);
   srv.today = (srv.today || 0) + 1; usedDia += job.price || 0; renderStudio();
-  return { png: new Blob([buf], { type: 'image/png' }), price: job.price || 0 };
+  return { png: new Blob([buf], { type: 'image/png' }), price: job.price || 0, cost: cost == null ? null : Number(cost) };
 }
-const paidText = (r) => (r.price ? `ใช้ ${r.price} 💎 · ` : 'สร้างฟรี · ');
+const paidText = (r) => (r.price ? `ใช้ ${r.price} 💎 · ` : 'สร้างฟรี · ') + (staffUsd() ? (r.cost != null ? `ค่าใช้จ่ายจริง ${fmtUsd(r.cost)} · ` : 'ค่าใช้จ่ายจริง: ยังไม่ได้ตั้งราคา · ') : '');
 
 // ---------- pictures (canvas) ----------
 const canvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
@@ -269,14 +283,16 @@ for (const el of document.querySelectorAll('.slot')) {
   });
   el.querySelector('.x').onclick = (e) => { e.preventDefault(); e.stopPropagation(); delete S.photos[slot]; el.classList.remove('has'); el.querySelector('img').removeAttribute('src'); hideFrom(2); };
 }
-const fields = () => ({ name: $('fName').value.trim(), food: $('fFood').value, toy: $('fToy').value, skill: $('fSkill').value, persona: $('fPersona').value });
+const fields = () => ({ name: $('fName').value.trim(), food: $('fFood').value, toy: $('fToy').value, skill: $('fSkill').value, persona: $('fPersona').value,
+  body: $('fBody').value || 'auto', request: $('fRequest').value.trim().slice(0, 300) });   // v77
 async function makeMaster(chained = false) {
   return busy((chained ? 'ขั้นที่ 1/2: ' : '') + 'กำลังสร้างภาพ Master (ประมาณ 30-90 วินาที)…', async (signal) => {
     const photos = SLOTS.map((k) => S.photos[k]).filter(Boolean);
     if (!photos.length) throw new AppError('ถ่ายหรือเลือกรูปต้นแบบอย่างน้อย 1 รูป');
     let share = 0; for (const p of photos) share = Math.max(share, await greenShare(p));
     S.bg = share > 0.06 ? 'magenta' : 'green';
-    const r = await studioRun('chibi', photos, { bg: S.bg, persona: fields().persona.slice(0, 200) }, signal);
+    const f0 = fields();
+    const r = await studioRun('chibi', photos, { bg: S.bg, persona: f0.persona.slice(0, 200), body: f0.body, ...(f0.request ? { request: f0.request } : {}) }, signal);
     S.master = r.png; S.cut = null;
     $('masterImg').src = urlOf(r.png);
     $('masterInfo').textContent = paidText(r) + `พื้นหลัง sprite sheet จะใช้สี${S.bg === 'magenta' ? 'ชมพู (ตัวละครมีสีเขียวมาก)' : 'เขียว'}`;
@@ -287,19 +303,19 @@ async function makeMaster(chained = false) {
 // v62.1: "สร้างภาพเคลื่อนไหว" = Master, then the sprite sheet right away (one cost question for both)
 async function makeAll() {
   const n = price('chibi') + price('sheet');
-  if (!needDia(n) || !confirm(diaAsk(n, freeOn() ? 'สร้างภาพเคลื่อนไหว: ภาพ Master แล้วต่อด้วย sprite sheet' : `สร้างภาพเคลื่อนไหว: ภาพ Master (${price('chibi')} 💎) แล้วต่อด้วย sprite sheet (${price('sheet')} 💎)\nรวม`) + '\nใช้เวลารวม 2-4 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?')) return;
+  if (!needDia(n) || !confirm(diaAsk(n, freeOn() ? 'สร้างภาพเคลื่อนไหว: ภาพ Master แล้วต่อด้วย sprite sheet' : `สร้างภาพเคลื่อนไหว: ภาพ Master (${price('chibi')} 💎) แล้วต่อด้วย sprite sheet (${price('sheet')} 💎)\nรวม`, ['chibi', 'sheet']) + '\nใช้เวลารวม 2-4 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?')) return;
   if (await makeMaster(true)) await makeSheet(true);
 }
 $('goMaster').onclick = () => makeAll();
-$('reMaster').onclick = () => { if (needDia(price('chibi')) && confirm(diaAsk(price('chibi'), 'สร้างภาพ Master ใหม่') + '\n\nทำต่อไหม?')) makeMaster(false); };
+$('reMaster').onclick = () => { if (needDia(price('chibi')) && confirm(diaAsk(price('chibi'), 'สร้างภาพ Master ใหม่', ['chibi']) + '\n\nทำต่อไหม?')) makeMaster(false); };
 
 // ---------- step 2 -> sheet -> cut ----------
 async function makeSheet(chained = false) {
-  if (!chained && (!needDia(price('sheet')) || !confirm(diaAsk(price('sheet'), 'สร้าง sprite sheet') + '\nใช้เวลา 1-3 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?'))) return;
+  if (!chained && (!needDia(price('sheet')) || !confirm(diaAsk(price('sheet'), 'สร้าง sprite sheet', ['sheet']) + '\nใช้เวลา 1-3 นาที เปิดหน้าจอค้างไว้\n\nทำต่อไหม?'))) return;
   await busy((chained ? 'ขั้นที่ 2/2: ' : '') + 'กำลังสร้าง sprite sheet (อาจใช้ 1-3 นาที)…', async (signal) => {
     if (!S.master) throw new AppError('ยังไม่มีภาพ Master');
     const f = fields();
-    const r = await studioRun('sheet', [S.master], { bg: S.bg, food: f.food.slice(0, 120), toy: f.toy.slice(0, 120), skill: f.skill.slice(0, 120), persona: f.persona.slice(0, 200) }, signal);
+    const r = await studioRun('sheet', [S.master], { bg: S.bg, food: f.food.slice(0, 120), toy: f.toy.slice(0, 120), skill: f.skill.slice(0, 120), persona: f.persona.slice(0, 200), body: f.body }, signal);
     S.sheet = r.png;
     $('busyText').textContent = 'กำลังตัดเป็นท่า…';
     await new Promise((ok) => setTimeout(ok, 30));
@@ -308,7 +324,7 @@ async function makeSheet(chained = false) {
 }
 async function cutSheetNow(r) {
   $('sheetImg').src = urlOf(S.sheet);
-  const lines = [r.price ? `ใช้ ${r.price} 💎 สำหรับ sheet นี้` : 'สร้าง sheet นี้ฟรี'];
+  const lines = [(r.price ? `ใช้ ${r.price} 💎 สำหรับ sheet นี้` : 'สร้าง sheet นี้ฟรี') + (staffUsd() ? (r.cost != null ? ` · ค่าใช้จ่ายจริง ${fmtUsd(r.cost)}` : ' · ค่าใช้จ่ายจริง: ยังไม่ได้ตั้งราคา') : '')];
   S.cut = null; S.orig = {}; selected.clear();
   try {
     const bm = await bgraOfBlob(S.sheet);
@@ -352,7 +368,7 @@ $('editGo').onclick = async () => {
   if (!text) { $('editText').focus(); return showErr(new AppError('พิมพ์อธิบายว่าจะแก้อะไร')); }
   if (keys.length > MAX_EDIT) return showErr(new AppError(`แก้ได้ครั้งละไม่เกิน ${MAX_EDIT} ภาพ`));
   const n = keys.length * price('edit');
-  if (!needDia(n) || !confirm(diaAsk(n, freeOn() ? `แก้ ${keys.length} ภาพ` : `แก้ ${keys.length} ภาพ ภาพละ ${price('edit')} 💎\nรวม`) + '\n\nทำต่อไหม?')) return;
+  if (!needDia(n) || !confirm(diaAsk(n, freeOn() ? `แก้ ${keys.length} ภาพ` : `แก้ ${keys.length} ภาพ ภาพละ ${price('edit')} 💎\nรวม`, keys.map(() => 'edit')) + '\n\nทำต่อไหม?')) return;
   await busy(`กำลังแก้ ${keys.length} ภาพ (ภาพละประมาณ 20-60 วินาที)…`, async (signal) => {
     let ok = 0, failure = null;
     for (const k of keys) {
@@ -402,7 +418,7 @@ $('again').onclick = () => {
   S = newSession();
   for (const el of document.querySelectorAll('.slot')) { el.classList.remove('has'); el.querySelector('img').removeAttribute('src'); }
   for (const id of ['fName', 'fFood', 'fToy', 'fSkill', 'fPersona', 'editText']) $(id).value = '';
-  $('secDone').hidden = true; hideFrom(2); usedDia = 0; render(); window.scrollTo({ top: 0, behavior: 'smooth' });
+  $('secDone').hidden = true; hideFrom(2); usedDia = 0; usedUsd = 0; render(); window.scrollTo({ top: 0, behavior: 'smooth' });
 };
 
 S = newSession();
